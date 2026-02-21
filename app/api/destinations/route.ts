@@ -258,12 +258,10 @@ export async function POST(request: NextRequest) {
       }, { status: 409 });
     }
 
-    // Use hero image if provided, otherwise use default
-    const heroImageUrl = heroImage || "/images/default-destination.jpg";
-    // Use uploaded images if any, otherwise use defaults
-    const finalImages = uploadedImages.length > 0 
-      ? uploadedImages 
-      : ["/images/giraffe.png", "/images/elephant.png"];
+    // Use hero image if provided, otherwise empty string (no default fallback)
+    const heroImageUrl = heroImage || "";
+    // Use uploaded images if any, otherwise empty array (no default fallback)
+    const finalImages = uploadedImages.length > 0 ? uploadedImages : [];
 
     // Truncate fields to limits before saving
     const truncatedName = name.substring(0, MAX_NAME_LENGTH);
