@@ -327,13 +327,16 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // Check for duplicate slug (idempotency)
-    const existing = await prisma.package.findUnique({ where: { slug } });
-    if (existing) {
-      return NextResponse.json({ 
-        error: "Package with this slug already exists", 
-        package: existing 
-      }, { status: 409 });
+    // Check for duplicate slug and make unique if necessary
+    let uniqueSlug = slug;
+    let counter = 1;
+    while (await prisma.package.findUnique({ where: { slug: uniqueSlug } })) {
+      uniqueSlug = `${slug}-${counter}`;
+      counter++;
+    }
+    // Update slug to the unique version
+    if (slug !== uniqueSlug) {
+      slug = uniqueSlug;
     }
 
     // Use uploaded images if any, otherwise use default
