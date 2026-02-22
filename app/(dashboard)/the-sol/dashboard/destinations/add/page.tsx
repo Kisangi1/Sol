@@ -8,6 +8,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { useRouter } from "next/navigation";
 import { AuthGuard } from "@/components/admin/auth-guard";
 
+import { toast } from "sonner";
+
 function AddDestinationForm() {
   const router = useRouter();
   const [formData, setFormData] = useState({
@@ -21,6 +23,10 @@ function AddDestinationForm() {
   const [imageFiles, setImageFiles] = useState<FileList | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // Constants for validation
+  const MAX_FILE_SIZE = 4 * 1024 * 1024; // 4MB per file
+  const MAX_TOTAL_SIZE = 4 * 1024 * 1024; // 4MB total for all images
+
   const handleHeroImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       setHeroImageFile(e.target.files[0]);
@@ -33,52 +39,72 @@ function AddDestinationForm() {
     }
   };
 
-
-
-  const convertToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = (error) => reject(error);
-    });
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+
     try {
-      let heroImageBase64 = "";
+      // Validate file sizes
+      let totalSize = 0;
       
-      // Convert hero image to base64
       if (heroImageFile) {
-        heroImageBase64 = await convertToBase64(heroImageFile);
+        if (heroImageFile.size > MAX_FILE_SIZE) {
+          toast.error(`Hero image is too large (max 4MB)`);
+          setLoading(false);
+          return;
+        }
+        totalSize += heroImageFile.size;
+      }
+
+      if (imageFiles) {
+        for (const file of Array.from(imageFiles)) {
+          if (file.size > MAX_FILE_SIZE) {
+            toast.error(`Image ${file.name} is too large (max 4MB)`);
+            setLoading(false);
+            return;
+          }
+          totalSize += file.size;
+        }
+      }
+
+      if (totalSize > MAX_TOTAL_SIZE) {
+        toast.error(`Total image size exceeds 4MB limit. Please reduce image sizes or count.`);
+        setLoading(false);
+        return;
+      }
+
+      const formDataToSend = new FormData();
+      formDataToSend.append("name", formData.name);
+      formDataToSend.append("slug", formData.slug);
+      formDataToSend.append("tagline", formData.tagline);
+      formDataToSend.append("description", formData.description);
+      formDataToSend.append("isPublished", String(formData.isPublished));
+      
+      if (heroImageFile) {
+        formDataToSend.append("heroImage", heroImageFile);
+      }
+      
+      if (imageFiles) {
+        for (let i = 0; i < imageFiles.length; i++) {
+          formDataToSend.append("images", imageFiles[i]);
+        }
       }
       
       const response = await fetch("/api/destinations", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          name: formData.name,
-          slug: formData.slug,
-          tagline: formData.tagline,
-          description: formData.description,
-          isPublished: formData.isPublished,
-          heroImage: heroImageBase64,
-        }),
+        body: formDataToSend,
       });
       
       if (response.ok) {
+        toast.success("Destination created successfully");
         router.push("/the-sol/dashboard/destinations");
       } else {
         const error = await response.json();
-        alert(error.error || "Failed to create destination");
+        toast.error(error.error || "Failed to create destination");
       }
     } catch (error) {
       console.error("Error:", error);
-      alert("An error occurred");
+      toast.error("An error occurred");
     } finally {
       setLoading(false);
     }
@@ -138,7 +164,7 @@ function AddDestinationForm() {
             className="bg-zinc-800 border-zinc-700 text-white file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-orange-500 file:text-white hover:file:bg-orange-600"
           />
           <p className="text-xs text-gray-500 mt-1">
-            {heroImageFile ? heroImageFile.name : "Select a hero image (uploaded to Supabase)"}
+            {heroImageFile ? heroImageFile.name : "Select a hero image (max 4MB)"}
           </p>
         </div>
         
@@ -152,7 +178,7 @@ function AddDestinationForm() {
             className="bg-zinc-800 border-zinc-700 text-white file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-orange-500 file:text-white hover:file:bg-orange-600"
           />
           <p className="text-xs text-gray-500 mt-1">
-            {imageFiles ? `${imageFiles.length} file(s) selected` : "Select one or multiple images (uploaded to Supabase)"}
+            {imageFiles ? `${imageFiles.length} file(s) selected` : "Select one or multiple images (max 4MB total)"}
           </p>
         </div>
         <div className="flex items-center space-x-2">

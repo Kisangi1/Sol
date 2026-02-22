@@ -98,19 +98,22 @@ function AddPackageForm() {
 
       // Validate file sizes - use for...of so return actually stops execution
       let totalFileSize = 0;
+      const MAX_FILE_SIZE = 4 * 1024 * 1024; // 4MB per file (Vercel limit safety)
+      const MAX_TOTAL_SIZE = 4 * 1024 * 1024; // 4MB total (Vercel limit safety)
+
       if (imageFiles) {
         // Check each file individually first
         for (const file of Array.from(imageFiles)) {
-          if (file.size > 5 * 1024 * 1024) {
-            toast.error(`Image ${file.name} is too large (max 5MB per file)`);
+          if (file.size > MAX_FILE_SIZE) {
+            toast.error(`Image ${file.name} is too large (max 4MB per file)`);
             setLoading(false);
             return; // Stop execution immediately
           }
           totalFileSize += file.size;
         }
         // Check total size
-        if (totalFileSize > 10 * 1024 * 1024) {
-          toast.error("Total image size must be less than 10MB");
+        if (totalFileSize > MAX_TOTAL_SIZE) {
+          toast.error("Total image size must be less than 4MB (Vercel limit)");
           setLoading(false);
           return; // Stop execution immediately
         }
@@ -300,12 +303,12 @@ function AddPackageForm() {
           />
           <p className="text-xs text-gray-500 mt-1">
             {imageFiles 
-              ? `${imageFiles.length} file(s) selected (max 5MB per file, 10MB total)` 
-              : "Select one or multiple images (max 5MB per file, 10MB total)"}
+              ? `${imageFiles.length} file(s) selected (max 4MB total)` 
+              : "Select one or multiple images (max 4MB total)"}
           </p>
-          {imageFiles && Array.from(imageFiles).some(f => f.size > 5 * 1024 * 1024) && (
+          {imageFiles && Array.from(imageFiles).some(f => f.size > 4 * 1024 * 1024) && (
             <p className="text-xs text-red-500 mt-1">
-              ⚠️ Some files exceed 5MB limit
+              ⚠️ Some files exceed 4MB limit
             </p>
           )}
         </div>

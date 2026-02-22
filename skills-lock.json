@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "nextjs-best-practices": {
+      "source": "sickn33/antigravity-awesome-skills",
+      "sourceType": "github",
+      "computedHash": "834f17bc3d7b4836360958bec576761b515e280a92658dcda9a63b1f237fba41"
+    }
+  }
+}

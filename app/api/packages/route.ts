@@ -207,8 +207,8 @@ export async function POST(request: NextRequest) {
       // Handle image files - upload to Supabase with size validation
       const imageFiles = formData.getAll("images") as File[];
       let totalFileSize = 0;
-      const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB per file
-      const MAX_TOTAL_SIZE = 10 * 1024 * 1024; // 10MB total
+      const MAX_FILE_SIZE = 4 * 1024 * 1024; // 4MB per file
+      const MAX_TOTAL_SIZE = 4.5 * 1024 * 1024; // 4.5MB total (Vercel limit)
       
       // Store image metadata for creating Image records
       const imageMetadata: Array<{
