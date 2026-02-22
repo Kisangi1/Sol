@@ -191,6 +191,7 @@ export async function POST(request: NextRequest) {
     let daysOfTravel: number;
     let isActive: boolean;
     let uploadedImages: string[] = [];
+    let failedUploads = 0;
 
     if (contentType.includes("multipart/form-data") || contentType.includes("form-data")) {
       // Handle FormData
@@ -206,8 +207,8 @@ export async function POST(request: NextRequest) {
       // Handle image files - upload to Supabase with size validation
       const imageFiles = formData.getAll("images") as File[];
       let totalFileSize = 0;
-      const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB per file
-      const MAX_TOTAL_SIZE = 10 * 1024 * 1024; // 10MB total
+      const MAX_FILE_SIZE = 4 * 1024 * 1024; // 4MB per file
+      const MAX_TOTAL_SIZE = 4.5 * 1024 * 1024; // 4.5MB total (Vercel limit)
       
       // Store image metadata for creating Image records
       const imageMetadata: Array<{
@@ -251,6 +252,7 @@ export async function POST(request: NextRequest) {
             });
           } catch (uploadError) {
             console.error("Error uploading package image:", uploadError);
+            failedUploads++;
             // Continue with other images even if one fails
           }
         }
@@ -327,50 +329,79 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // Check for duplicate slug and make unique if necessary
-    let uniqueSlug = slug;
-    let counter = 1;
-    while (await prisma.package.findUnique({ where: { slug: uniqueSlug } })) {
-      uniqueSlug = `${slug}-${counter}`;
-      counter++;
-    }
-    // Update slug to the unique version
-    if (slug !== uniqueSlug) {
-      slug = uniqueSlug;
-    }
-
     // Use uploaded images if any, otherwise use default
     // Only use uploaded images from Supabase buckets - no default fallback
     const finalImages = uploadedImages.length > 0 ? uploadedImages : [];
+    
+    if (failedUploads > 0 && uploadedImages.length === 0) {
+      console.error("All image uploads failed. Check Supabase configuration.");
+    }
 
     // Truncate fields to limits before saving
     const truncatedName = name.substring(0, MAX_NAME_LENGTH);
-    const truncatedSlug = slug.substring(0, MAX_SLUG_LENGTH);
     const truncatedDescription = description.substring(0, MAX_DESCRIPTION_LENGTH);
 
     let packageData;
     try {
-      packageData = await prisma.package.create({
-        data: {
-          name: truncatedName,
-          slug: truncatedSlug,
-          packageType,
-          description: truncatedDescription,
-          pricing,
-          daysOfTravel,
-          images: finalImages,
-          maxCapacity: 10,
-          currentBookings: 0,
-          destination: {
-            id: "default",
-            name: "Kenya",
-            slug: "kenya",
-            bestTime: "Year-round"
-          },
-          isActive,
-          createdBy: session.user.id,
-        },
-      });
+      let attempts = 0;
+      const maxAttempts = 3;
+
+      // Retry loop to handle race conditions for unique slug
+      while (attempts < maxAttempts) {
+        try {
+          // Check for duplicate slug and make unique if necessary
+          // Recalculate inside loop to handle race conditions
+          let uniqueSlug = slug;
+          let counter = 1;
+          while (await prisma.package.findUnique({ where: { slug: uniqueSlug } })) {
+            uniqueSlug = `${slug}-${counter}`;
+            counter++;
+          }
+          
+          const truncatedSlug = uniqueSlug.substring(0, MAX_SLUG_LENGTH);
+
+          packageData = await prisma.package.create({
+            data: {
+              name: truncatedName,
+              slug: truncatedSlug,
+              packageType,
+              description: truncatedDescription,
+              pricing,
+              daysOfTravel,
+              images: finalImages,
+              maxCapacity: 10,
+              currentBookings: 0,
+              destination: {
+                id: "default",
+                name: "Kenya",
+                slug: "kenya",
+                bestTime: "Year-round"
+              },
+              isActive,
+              createdBy: session.user.id,
+            },
+          });
+          
+          // If successful, break loop
+          break;
+        } catch (dbError) {
+          attempts++;
+          // If it's a unique constraint error and we have retries left, continue
+          if (dbError instanceof Error && 
+              (dbError.message.includes('Unique constraint') || dbError.message.includes('duplicate')) && 
+              attempts < maxAttempts) {
+            console.log(`Slug collision for ${slug}, retrying... (Attempt ${attempts})`);
+            continue;
+          }
+          
+          // Otherwise throw to be caught by outer catch
+          throw dbError;
+        }
+      }
+
+      if (!packageData) {
+        throw new Error("Failed to create package");
+      }
       
       // Create Image records in database for packageImages relation
       if (imageMetadata.length > 0 && packageData.id) {
@@ -417,7 +448,11 @@ export async function POST(request: NextRequest) {
     revalidateTag('packages');
     revalidateTag(`package-${slug}`);
 
-    return NextResponse.json({ success: true, package: packageData }, { status: 201 });
+    return NextResponse.json({ 
+      success: true, 
+      package: packageData,
+      warnings: failedUploads > 0 ? ["Image uploads failed"] : undefined
+    }, { status: 201 });
   } catch (error) {
     // General error logging
     if (error instanceof Error) {

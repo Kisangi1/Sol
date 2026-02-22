@@ -134,8 +134,8 @@ export async function POST(request: NextRequest) {
       isPublished = formData.get("isPublished") === "true";
       
       // Handle hero image file - upload to Supabase with size validation
-      const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB per file
-      const MAX_TOTAL_SIZE = 10 * 1024 * 1024; // 10MB total
+      const MAX_FILE_SIZE = 4 * 1024 * 1024; // 4MB per file
+      const MAX_TOTAL_SIZE = 4.5 * 1024 * 1024; // 4.5MB total (Vercel limit)
       let totalFileSize = 0;
       
       const heroImageFile = formData.get("heroImage") as File | null;
@@ -152,8 +152,8 @@ export async function POST(request: NextRequest) {
           heroImage = await uploadToSupabase("destinations", heroImageFile);
         } catch (uploadError) {
           console.error("Error uploading hero image:", uploadError);
-          // Fallback to default image if upload fails
-          heroImage = "/images/default-destination.jpg";
+          // Fallback to empty string if upload fails
+          heroImage = "";
         }
       }
       
