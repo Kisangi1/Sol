@@ -149,7 +149,7 @@ const Footer = () => {
         <div className="relative flex-1 min-h-[500px] md:min-h-[600px] order-1 md:order-2">
           {/* Background Image */}
           <Image
-            src="/images/elephant.png"
+            src="/images/gallery/ambolife.jpg"
             alt="African Safari Landscape"
             fill
             className="object-cover"

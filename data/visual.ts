@@ -3,7 +3,7 @@ export const experiences = [
     id: 1,
     title: "Masai Mara Safari",
     category: "Wildlife Adventure",
-    image: "/images/lion.png",
+    image: "/images/gallery/buffalo.jpg",
     description:
       "Experience the Great Migration and witness Africa's iconic Big Five in their natural habitat",
   },
@@ -11,7 +11,7 @@ export const experiences = [
     id: 2,
     title: "Coastal Getaway",
     category: "Beach & Relaxation",
-    image: "/images/sea.png",
+    image: "/images/gallery/a.jpg",
     description:
       "Pristine white sand beaches and turquoise waters of the Indian Ocean await you",
   },
@@ -19,7 +19,7 @@ export const experiences = [
     id: 3,
     title: "Cultural Immersion",
     category: "Heritage Tours",
-    image: "/images/giraffe.png",
+    image: "/images/gallery/ambolife.jpg",
     description:
       "Discover ancient traditions and connect with local communities across East Africa",
   },
@@ -27,7 +27,7 @@ export const experiences = [
     id: 4,
     title: "Mountain Expeditions",
     category: "Adventure & Hiking",
-    image: "/images/elephant.png",
+    image: "/images/gallery/c.jpg",
     description:
       "Conquer majestic peaks and explore breathtaking highland landscapes",
   },
