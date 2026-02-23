@@ -1,6 +1,5 @@
 "use client";
 import Image from "next/image";
-import Link from "next/link";
 import { motion } from "motion/react";
 import { experiences } from "@/data/visual";
 
@@ -36,11 +35,7 @@ const FeaturedExperiences = () => {
               viewport={{ once: true, margin: "-100px" }}
               transition={{ duration: 0.6, delay: index * 0.1 }}
             >
-              <Link
-                // @ts-expect-error - Dynamic route from data file
-                href={`/experiences/${experience.id}`}
-                className="group cursor-pointer block"
-              >
+              <div className="block">
                 {/* Image Container - 1st and 3rd are tall, 2nd and 4th are short */}
                 <motion.div
                   whileHover={{ y: -8 }}
@@ -62,9 +57,6 @@ const FeaturedExperiences = () => {
                       unoptimized
                     />
                   </motion.div>
-
-                  {/* Subtle overlay on hover */}
-                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all duration-500" />
                 </motion.div>
 
                 {/* Text Content Below Image */}
@@ -75,7 +67,7 @@ const FeaturedExperiences = () => {
                   </p>
 
                   {/* Title */}
-                  <h3 className="text-white text-xl font-bold leading-tight group-hover:text-orange-500 transition-colors duration-300">
+                  <h3 className="text-white text-xl font-bold leading-tight">
                     {experience.title}
                   </h3>
 
@@ -84,7 +76,7 @@ const FeaturedExperiences = () => {
                     {experience.description}
                   </p>
                 </div>
-              </Link>
+              </div>
             </motion.div>
           ))}
         </div>
