@@ -18,6 +18,10 @@ export async function getAllDestinations() {
         description: true,
         heroImage: true,
         images: true,
+        destinationImages: {
+          orderBy: [{ isHero: "desc" }, { displayOrder: "asc" }],
+          select: { url: true, isHero: true, displayOrder: true },
+        },
         location: true,
         highlights: true,
         isPublished: true,

@@ -12,7 +12,8 @@
     "prisma:push": "npx dotenv-cli -e .env -- prisma db push",
     "prisma:studio": "npx dotenv-cli -e .env -- prisma studio",
     "prisma:migrate": "npx dotenv-cli -e .env -- prisma migrate dev",
-    "seed:admins": "npx dotenv-cli -e .env -- tsx scripts/seed-admin-emails.ts"
+    "seed:admins": "npx dotenv-cli -e .env -- tsx scripts/seed-admin-emails.ts",
+    "reset:catalog": "npx dotenv-cli -e .env -- tsx scripts/reset-packages-destinations.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

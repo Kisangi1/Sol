@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
 import { prisma } from "@/lib/prisma";
-import { uploadToSupabase, deleteFromSupabase } from "@/lib/supabase";
+import { deleteFromSupabase } from "@/lib/supabase";
+import { createImages } from "@/lib/dal/images";
 import { revalidateTag } from "next/cache";
 
 // GET single package by ID
@@ -57,69 +58,25 @@ export async function PUT(request: NextRequest, context: any) {
       return NextResponse.json({ error: "Package not found" }, { status: 404 });
     }
 
-    // Check content type to determine if it's JSON (toggle) or FormData (edit)
     const contentType = request.headers.get("content-type");
     
-    if (contentType?.includes("application/json")) {
-      // Handle JSON update (for toggle)
-      const body = await request.json();
-      
+    if (!contentType?.includes("application/json")) {
+      return NextResponse.json(
+        { error: "Unsupported content type", details: "Use JSON + signed uploads" },
+        { status: 415 }
+      );
+    }
+
+    const body = await request.json();
+
+    const keys = Object.keys(body || {});
+    const isToggleOnly =
+      keys.length === 1 && typeof body.isActive === "boolean";
+
+    if (isToggleOnly) {
       const packageData = await prisma.package.update({
         where: { id: params.id },
-        data: {
-          isActive: body.isActive,
-        },
-      });
-
-      // Revalidate cache
-      revalidateTag('packages');
-      revalidateTag(`package-${packageData.slug}`);
-
-      return NextResponse.json(packageData);
-    } else {
-      // Handle FormData update (for edit with possible image)
-      const formData = await request.formData();
-      
-      const name = formData.get("name") as string;
-      const slug = formData.get("slug") as string;
-      const packageType = formData.get("packageType") as string;
-      const description = formData.get("description") as string;
-      const pricing = parseFloat(formData.get("pricing") as string);
-      const daysOfTravel = parseInt(formData.get("daysOfTravel") as string);
-      const isActive = formData.get("isActive") === "true";
-      
-      // Handle image files upload
-      let finalImages = existingPackage.images || [];
-      const imageFiles = formData.getAll("images") as File[];
-      if (imageFiles.length > 0) {
-        const newImages: string[] = [];
-        for (const imageFile of imageFiles) {
-          if (imageFile instanceof File && imageFile.size > 0) {
-            try {
-              const imageUrl = await uploadToSupabase("packages", imageFile);
-              newImages.push(imageUrl);
-            } catch (uploadError) {
-              console.error("Error uploading package image:", uploadError);
-            }
-          }
-        }
-        if (newImages.length > 0) {
-          finalImages = [...finalImages, ...newImages];
-        }
-      }
-
-      const packageData = await prisma.package.update({
-        where: { id: params.id },
-        data: {
-          name,
-          slug,
-          packageType,
-          description,
-          pricing,
-          daysOfTravel,
-          images: finalImages,
-          isActive,
-        },
+        data: { isActive: body.isActive },
       });
 
       // Revalidate cache
@@ -128,6 +85,89 @@ export async function PUT(request: NextRequest, context: any) {
 
       return NextResponse.json(packageData);
     }
+
+    // Full update (expects images already uploaded to Supabase)
+    const name = (body.name ?? existingPackage.name) as string;
+    const slug = (body.slug ?? existingPackage.slug) as string;
+    const packageType = (body.packageType ?? existingPackage.packageType) as string;
+    const description = (body.description ?? existingPackage.description) as string;
+    const pricing = Number(body.pricing ?? existingPackage.pricing);
+    const daysOfTravel = Number(body.daysOfTravel ?? existingPackage.daysOfTravel);
+    const isActive = Boolean(body.isActive ?? existingPackage.isActive);
+
+    const images = Array.isArray(body.images) ? body.images : existingPackage.images;
+
+    // Optional imagesMeta: if provided, we replace Image rows for this package
+    const imagesMeta = Array.isArray(body.imagesMeta) ? body.imagesMeta : null;
+
+    // Attempt slug update with de-duplication if slug changed
+    const baseSlug = slug;
+    let updated: any | null = null;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const trySlug = attempt === 0 ? baseSlug : `${baseSlug}-${attempt}`;
+      try {
+        updated = await prisma.package.update({
+          where: { id: params.id },
+          data: {
+            name,
+            slug: trySlug,
+            packageType,
+            description,
+            pricing,
+            daysOfTravel,
+            images,
+            isActive,
+          },
+        });
+        break;
+      } catch (dbError) {
+        const code = (dbError as any)?.code;
+        if (code === "P2002" && attempt < 4) continue;
+        return NextResponse.json(
+          {
+            error: code === "P2002" ? "Duplicate slug" : "Database error",
+            details: dbError instanceof Error ? dbError.message : "Unknown error",
+          },
+          { status: code === "P2002" ? 409 : 500 }
+        );
+      }
+    }
+
+    if (!updated) {
+      return NextResponse.json(
+        { error: "Failed to update package" },
+        { status: 500 }
+      );
+    }
+
+    if (imagesMeta) {
+      try {
+        await prisma.image.deleteMany({ where: { packageId: params.id } });
+        await createImages(
+          imagesMeta.map((img: any, idx: number) => ({
+            url: String(img.url),
+            bucket: "packages",
+            filename: String(img.filename || `image-${idx}`),
+            filePath: String(img.filePath || ""),
+            fileSize: Number(img.fileSize || 0),
+            mimeType: String(img.mimeType || "application/octet-stream"),
+            isHero: Boolean(img.isHero ?? idx === 0),
+            displayOrder: Number.isFinite(img.displayOrder)
+              ? Number(img.displayOrder)
+              : idx,
+            packageId: params.id,
+          }))
+        );
+      } catch (e) {
+        console.error("Error syncing package image records:", e);
+      }
+    }
+
+    // Revalidate cache
+    revalidateTag("packages");
+    revalidateTag(`package-${updated.slug}`);
+
+    return NextResponse.json(updated);
   } catch (error) {
     console.error("Error updating package:", error);
     return NextResponse.json(

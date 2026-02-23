@@ -15,6 +15,7 @@ import {
 import { useRouter } from "next/navigation";
 import { AuthGuard } from "@/components/admin/auth-guard";
 import { toast } from "sonner";
+import { uploadFilesViaSignedUrls } from "@/lib/uploads/signedUploadClient";
 
 // Character limits to prevent 413 errors
 const MAX_DESCRIPTION_LENGTH = 5000;
@@ -96,51 +97,53 @@ function AddPackageForm() {
         return;
       }
 
-      // Validate file sizes - use for...of so return actually stops execution
-      let totalFileSize = 0;
-      const MAX_FILE_SIZE = 4 * 1024 * 1024; // 4MB per file (Vercel limit safety)
-      const MAX_TOTAL_SIZE = 4 * 1024 * 1024; // 4MB total (Vercel limit safety)
-
-      if (imageFiles) {
-        // Check each file individually first
-        for (const file of Array.from(imageFiles)) {
-          if (file.size > MAX_FILE_SIZE) {
-            toast.error(`Image ${file.name} is too large (max 4MB per file)`);
-            setLoading(false);
-            return; // Stop execution immediately
-          }
-          totalFileSize += file.size;
-        }
-        // Check total size
-        if (totalFileSize > MAX_TOTAL_SIZE) {
-          toast.error("Total image size must be less than 4MB (Vercel limit)");
-          setLoading(false);
-          return; // Stop execution immediately
-        }
+      // Require at least 1 image for packages (prevents "No image available")
+      if (!imageFiles || imageFiles.length === 0) {
+        toast.error("Please add at least one package image");
+        setLoading(false);
+        return;
       }
 
-      // Use FormData instead of JSON to avoid base64 size issues
-      const formDataToSend = new FormData();
-      formDataToSend.append("name", formData.name.trim().substring(0, MAX_NAME_LENGTH));
-      formDataToSend.append("slug", formData.slug.trim().toLowerCase().substring(0, MAX_SLUG_LENGTH));
-      formDataToSend.append("packageType", formData.packageType);
-      formDataToSend.append("description", formData.description.trim().substring(0, MAX_DESCRIPTION_LENGTH));
-      formDataToSend.append("pricing", pricing.toString());
-      formDataToSend.append("daysOfTravel", daysOfTravel.toString());
-      formDataToSend.append("isActive", formData.isActive.toString());
+      // Upload images directly to Supabase Storage via signed URLs (best practice on Vercel)
+      const files = Array.from(imageFiles);
+      const folder = `packages/${formData.slug}`
+        .replace(/[^a-z0-9/-]/gi, "-")
+        .replace(/-+/g, "-");
 
-      // Only append files that passed validation
-      if (imageFiles) {
-        for (const file of Array.from(imageFiles)) {
-          if (file.size > 0 && file.size <= 5 * 1024 * 1024) {
-            formDataToSend.append("images", file);
-          }
-        }
-      }
+      const uploads = await uploadFilesViaSignedUrls({
+        bucket: "packages",
+        folder,
+        files,
+      });
+
+      const imagesMeta = uploads.map((u, idx) => {
+        const f = files[idx];
+        return {
+          url: u.publicUrl,
+          bucket: "packages",
+          filename: f?.name || u.filename,
+          filePath: u.path,
+          fileSize: f?.size || 0,
+          mimeType: f?.type || u.contentType,
+          isHero: idx === 0,
+          displayOrder: idx,
+        };
+      });
 
       const response = await fetch("/api/packages", {
         method: "POST",
-        body: formDataToSend,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: formData.name.trim().substring(0, MAX_NAME_LENGTH),
+          slug: formData.slug.trim().toLowerCase().substring(0, MAX_SLUG_LENGTH),
+          packageType: formData.packageType,
+          description: formData.description.trim().substring(0, MAX_DESCRIPTION_LENGTH),
+          pricing,
+          daysOfTravel,
+          isActive: formData.isActive,
+          images: uploads.map((u) => u.publicUrl),
+          imagesMeta,
+        }),
       });
 
       const data = await response.json();
@@ -302,13 +305,13 @@ function AddPackageForm() {
             className="bg-zinc-800 border-zinc-700 text-white file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-orange-500 file:text-white hover:file:bg-orange-600"
           />
           <p className="text-xs text-gray-500 mt-1">
-            {imageFiles 
-              ? `${imageFiles.length} file(s) selected (max 4MB total)` 
-              : "Select one or multiple images (max 4MB total)"}
+            {imageFiles
+              ? `${imageFiles.length} file(s) selected (recommended <= 10MB per file)`
+              : "Select one or multiple images (recommended <= 10MB per file)"}
           </p>
-          {imageFiles && Array.from(imageFiles).some(f => f.size > 4 * 1024 * 1024) && (
+          {imageFiles && Array.from(imageFiles).some(f => f.size > 10 * 1024 * 1024) && (
             <p className="text-xs text-red-500 mt-1">
-              ⚠️ Some files exceed 4MB limit
+              ⚠️ Some files exceed 10MB recommended limit
             </p>
           )}
         </div>

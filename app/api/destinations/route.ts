@@ -4,6 +4,7 @@ import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { uploadToSupabase } from "@/lib/supabase";
+import { createImages } from "@/lib/dal/images";
 import { revalidateTag } from "next/cache";
 
 // GET all destinations or single by slug
@@ -18,8 +19,35 @@ export async function GET(request: NextRequest) {
       // Get single destination by slug
       const destination = await prisma.destination.findUnique({
         where: { slug, isPublished: true },
+        include: {
+          destinationImages: {
+            orderBy: [{ isHero: "desc" }, { displayOrder: "asc" }],
+            select: {
+              url: true,
+              isHero: true,
+              displayOrder: true,
+            },
+          },
+        },
       });
-      return NextResponse.json(destination ? [destination] : []);
+      if (!destination) return NextResponse.json([]);
+
+      const relImages = (destination.destinationImages || [])
+        .map((img) => img.url)
+        .filter(Boolean);
+      const relHero =
+        destination.destinationImages?.find((img) => img.isHero)?.url ||
+        destination.destinationImages?.[0]?.url ||
+        destination.heroImage ||
+        "";
+
+      return NextResponse.json([
+        {
+          ...destination,
+          heroImage: relHero,
+          images: relImages.length > 0 ? relImages : destination.images || [],
+        },
+      ]);
     }
 
     // Get all destinations
@@ -39,10 +67,20 @@ export async function GET(request: NextRequest) {
           location: true,
           highlights: true, // Needed for display
           isPublished: true,
+          destinationImages: {
+            where: { isHero: true },
+            take: 1,
+            select: { url: true },
+          },
           // Exclude: images array, overview, wildlife, bestTimeToVisit, thingsToKnow, whatToPack, accommodation, activities, createdAt, updatedAt
         },
       });
-      return NextResponse.json(destinations, {
+      const transformed = destinations.map((d: any) => ({
+        ...d,
+        heroImage: d.destinationImages?.[0]?.url || d.heroImage || "",
+      }));
+
+      return NextResponse.json(transformed, {
         headers: {
           'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400',
         },
@@ -72,11 +110,31 @@ export async function GET(request: NextRequest) {
         highlights: true,
         funFacts: true,
         isPublished: true,
+        destinationImages: {
+          orderBy: [{ isHero: "desc" }, { displayOrder: "asc" }],
+          select: { url: true, isHero: true, displayOrder: true },
+        },
         // Exclude: createdAt, updatedAt, createdBy to reduce payload
       },
     });
 
-    return NextResponse.json(destinations, {
+    const transformed = destinations.map((d: any) => {
+      const relImages = (d.destinationImages || [])
+        .map((img: any) => img.url)
+        .filter(Boolean);
+      const relHero =
+        d.destinationImages?.find((img: any) => img.isHero)?.url ||
+        d.destinationImages?.[0]?.url ||
+        d.heroImage ||
+        "";
+      return {
+        ...d,
+        heroImage: relHero,
+        images: relImages.length > 0 ? relImages : d.images || [],
+      };
+    });
+
+    return NextResponse.json(transformed, {
       headers: {
         'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400',
       },
@@ -123,6 +181,16 @@ export async function POST(request: NextRequest) {
     let isPublished: boolean;
     let heroImage: string | null = null;
     let uploadedImages: string[] = [];
+    let imagesMeta: Array<{
+      url: string;
+      bucket: "destinations";
+      filename: string;
+      filePath: string;
+      fileSize: number;
+      mimeType: string;
+      isHero?: boolean;
+      displayOrder?: number;
+    }> = [];
 
     if (contentType.includes("multipart/form-data") || contentType.includes("form-data")) {
       // Handle FormData
@@ -150,6 +218,18 @@ export async function POST(request: NextRequest) {
         
         try {
           heroImage = await uploadToSupabase("destinations", heroImageFile);
+          const urlParts = heroImage.split(`/storage/v1/object/public/destinations/`);
+          const filePath = urlParts.length > 1 ? urlParts[1] : heroImageFile.name;
+          imagesMeta.push({
+            url: heroImage,
+            bucket: "destinations",
+            filename: heroImageFile.name,
+            filePath,
+            fileSize: heroImageFile.size,
+            mimeType: heroImageFile.type,
+            isHero: true,
+            displayOrder: 0,
+          });
         } catch (uploadError) {
           console.error("Error uploading hero image:", uploadError);
           // Fallback to empty string if upload fails
@@ -179,6 +259,18 @@ export async function POST(request: NextRequest) {
           try {
             const imageUrl = await uploadToSupabase("destinations", imageFile);
             uploadedImages.push(imageUrl);
+            const urlParts = imageUrl.split(`/storage/v1/object/public/destinations/`);
+            const filePath = urlParts.length > 1 ? urlParts[1] : imageFile.name;
+            imagesMeta.push({
+              url: imageUrl,
+              bucket: "destinations",
+              filename: imageFile.name,
+              filePath,
+              fileSize: imageFile.size,
+              mimeType: imageFile.type,
+              isHero: false,
+              displayOrder: imagesMeta.length, // after hero (if any)
+            });
           } catch (uploadError) {
             console.error("Error uploading additional image:", uploadError);
             // Continue with other images even if one fails
@@ -195,6 +287,21 @@ export async function POST(request: NextRequest) {
       isPublished = body.isPublished ?? false;
       heroImage = body.heroImage || null;
       uploadedImages = body.images || [];
+      // Prefer explicit image metadata from client (signed-upload flow)
+      if (Array.isArray(body.imagesMeta)) {
+        imagesMeta = body.imagesMeta
+          .filter((img: any) => img && typeof img.url === "string")
+          .map((img: any, index: number) => ({
+            url: img.url,
+            bucket: "destinations" as const,
+            filename: String(img.filename || `image-${index}`),
+            filePath: String(img.filePath || ""),
+            fileSize: Number(img.fileSize || 0),
+            mimeType: String(img.mimeType || "application/octet-stream"),
+            isHero: Boolean(img.isHero),
+            displayOrder: Number.isFinite(img.displayOrder) ? Number(img.displayOrder) : index,
+          }));
+      }
     }
 
     // Character limits to prevent 413 errors
@@ -249,14 +356,11 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // Check for duplicate slug (idempotency)
-    const existing = await prisma.destination.findUnique({ where: { slug } });
-    if (existing) {
-      return NextResponse.json({ 
-        error: "Destination with this slug already exists", 
-        destination: existing 
-      }, { status: 409 });
-    }
+    // Create destination with slug de-duplication (race-safe)
+    const baseSlug = slug;
+    let destination: any | null = null;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const trySlug = attempt === 0 ? baseSlug : `${baseSlug}-${attempt}`;
 
     // Use hero image if provided, otherwise empty string (no default fallback)
     const heroImageUrl = heroImage || "";
@@ -269,12 +373,11 @@ export async function POST(request: NextRequest) {
     const truncatedTagline = tagline.substring(0, MAX_TAGLINE_LENGTH);
     const truncatedDescription = description.substring(0, MAX_DESCRIPTION_LENGTH);
 
-    let destination;
     try {
       destination = await prisma.destination.create({
         data: {
           name: truncatedName,
-          slug: truncatedSlug,
+          slug: trySlug.substring(0, MAX_SLUG_LENGTH),
           tagline: truncatedTagline,
           description: truncatedDescription,
           heroImage: heroImageUrl,
@@ -282,38 +385,38 @@ export async function POST(request: NextRequest) {
           location: {
             country: "Kenya",
             region: name,
-            coordinates: { lat: 0, lng: 0 }
+            coordinates: { lat: 0, lng: 0 },
           },
           overview: {
             title: "Overview",
-            content: truncatedDescription
+            content: truncatedDescription,
           },
           wildlife: {
             title: "Wildlife",
             description: "Discover amazing wildlife",
-            animals: []
+            animals: [],
           },
           bestTimeToVisit: {
             title: "Best Time to Visit",
             description: "Year-round destination",
-            seasons: []
+            seasons: [],
           },
           thingsToKnow: {
             title: "Things to Know",
-            items: []
+            items: [],
           },
           whatToPack: {
             title: "What to Pack",
-            categories: []
+            categories: [],
           },
           accommodation: {
             title: "Accommodation",
             description: "Various accommodation options available",
-            types: []
+            types: [],
           },
           activities: {
             title: "Activities",
-            list: []
+            list: [],
           },
           highlights: [],
           funFacts: [],
@@ -321,15 +424,47 @@ export async function POST(request: NextRequest) {
           createdBy: session.user.id,
         },
       });
+
+      // Create Image rows (best-effort). If missing metadata, we still keep legacy fields.
+      if (destination?.id && imagesMeta.length > 0) {
+        // Ensure destinationId set
+        await createImages(
+          imagesMeta.map((img, idx) => ({
+            ...img,
+            bucket: "destinations",
+            destinationId: destination.id,
+            isHero: img.isHero ?? idx === 0,
+            displayOrder: img.displayOrder ?? idx,
+          }))
+        );
+      }
+
+      // success
+      slug = destination.slug;
+      break;
     } catch (dbError) {
-      // Prisma/DB error logging
+      const code = (dbError as any)?.code;
+      if (code === "P2002" && attempt < 4) {
+        continue; // try next slug
+      }
       if (dbError instanceof Error) {
         console.error("Prisma error creating destination:", dbError.message, dbError.stack);
       } else {
         console.error("Prisma error creating destination:", dbError);
       }
       return NextResponse.json(
-        { error: "Database error", details: dbError instanceof Error ? dbError.message : "Unknown error" },
+        {
+          error: code === "P2002" ? "Duplicate slug" : "Database error",
+          details: dbError instanceof Error ? dbError.message : "Unknown error",
+        },
+        { status: code === "P2002" ? 409 : 500 }
+      );
+    }
+    }
+
+    if (!destination) {
+      return NextResponse.json(
+        { error: "Failed to create destination" },
         { status: 500 }
       );
     }
