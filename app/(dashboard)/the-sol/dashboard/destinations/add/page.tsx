@@ -9,6 +9,7 @@ import { useRouter } from "next/navigation";
 import { AuthGuard } from "@/components/admin/auth-guard";
 
 import { toast } from "sonner";
+import { uploadFilesViaSignedUrls } from "@/lib/uploads/signedUploadClient";
 
 function AddDestinationForm() {
   const router = useRouter();
@@ -24,8 +25,8 @@ function AddDestinationForm() {
   const [loading, setLoading] = useState(false);
 
   // Constants for validation
-  const MAX_FILE_SIZE = 4 * 1024 * 1024; // 4MB per file
-  const MAX_TOTAL_SIZE = 4 * 1024 * 1024; // 4MB total for all images
+  const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB per file
+  const MAX_TOTAL_SIZE = 30 * 1024 * 1024; // 30MB total (client-side UX limit)
 
   const handleHeroImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -49,7 +50,7 @@ function AddDestinationForm() {
       
       if (heroImageFile) {
         if (heroImageFile.size > MAX_FILE_SIZE) {
-          toast.error(`Hero image is too large (max 4MB)`);
+          toast.error(`Hero image is too large (max 10MB)`);
           setLoading(false);
           return;
         }
@@ -59,7 +60,7 @@ function AddDestinationForm() {
       if (imageFiles) {
         for (const file of Array.from(imageFiles)) {
           if (file.size > MAX_FILE_SIZE) {
-            toast.error(`Image ${file.name} is too large (max 4MB)`);
+            toast.error(`Image ${file.name} is too large (max 10MB)`);
             setLoading(false);
             return;
           }
@@ -68,31 +69,77 @@ function AddDestinationForm() {
       }
 
       if (totalSize > MAX_TOTAL_SIZE) {
-        toast.error(`Total image size exceeds 4MB limit. Please reduce image sizes or count.`);
+        toast.error(`Total image size exceeds 30MB limit. Please reduce image sizes or count.`);
         setLoading(false);
         return;
       }
 
-      const formDataToSend = new FormData();
-      formDataToSend.append("name", formData.name);
-      formDataToSend.append("slug", formData.slug);
-      formDataToSend.append("tagline", formData.tagline);
-      formDataToSend.append("description", formData.description);
-      formDataToSend.append("isPublished", String(formData.isPublished));
-      
-      if (heroImageFile) {
-        formDataToSend.append("heroImage", heroImageFile);
-      }
-      
-      if (imageFiles) {
-        for (let i = 0; i < imageFiles.length; i++) {
-          formDataToSend.append("images", imageFiles[i]);
-        }
-      }
-      
+      // Upload images directly to Supabase Storage via signed URLs (best practice on Vercel)
+      const folder = `destinations/${formData.slug}`
+        .replace(/[^a-z0-9/-]/gi, "-")
+        .replace(/-+/g, "-");
+
+      const heroUploads = heroImageFile
+        ? await uploadFilesViaSignedUrls({
+            bucket: "destinations",
+            folder,
+            files: [heroImageFile],
+          })
+        : [];
+
+      const additionalUploads = imageFiles
+        ? await uploadFilesViaSignedUrls({
+            bucket: "destinations",
+            folder,
+            files: Array.from(imageFiles),
+          })
+        : [];
+
+      const hero = heroUploads[0];
+
+      const imagesMeta = [
+        ...(hero
+          ? [
+              {
+                url: hero.publicUrl,
+                bucket: "destinations",
+                filename: heroImageFile?.name || hero.filename,
+                filePath: hero.path,
+                fileSize: heroImageFile?.size || 0,
+                mimeType: heroImageFile?.type || hero.contentType,
+                isHero: true,
+                displayOrder: 0,
+              },
+            ]
+          : []),
+        ...additionalUploads.map((u, idx) => {
+          const f = imageFiles ? Array.from(imageFiles)[idx] : undefined;
+          return {
+            url: u.publicUrl,
+            bucket: "destinations",
+            filename: f?.name || u.filename,
+            filePath: u.path,
+            fileSize: f?.size || 0,
+            mimeType: f?.type || u.contentType,
+            isHero: false,
+            displayOrder: (hero ? 1 : 0) + idx,
+          };
+        }),
+      ];
+
       const response = await fetch("/api/destinations", {
         method: "POST",
-        body: formDataToSend,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: formData.name,
+          slug: formData.slug,
+          tagline: formData.tagline,
+          description: formData.description,
+          isPublished: formData.isPublished,
+          heroImage: hero?.publicUrl || "",
+          images: additionalUploads.map((u) => u.publicUrl),
+          imagesMeta,
+        }),
       });
       
       if (response.ok) {
@@ -164,7 +211,7 @@ function AddDestinationForm() {
             className="bg-zinc-800 border-zinc-700 text-white file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-orange-500 file:text-white hover:file:bg-orange-600"
           />
           <p className="text-xs text-gray-500 mt-1">
-            {heroImageFile ? heroImageFile.name : "Select a hero image (max 4MB)"}
+            {heroImageFile ? heroImageFile.name : "Select a hero image (max 10MB)"}
           </p>
         </div>
         
@@ -178,7 +225,7 @@ function AddDestinationForm() {
             className="bg-zinc-800 border-zinc-700 text-white file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-orange-500 file:text-white hover:file:bg-orange-600"
           />
           <p className="text-xs text-gray-500 mt-1">
-            {imageFiles ? `${imageFiles.length} file(s) selected` : "Select one or multiple images (max 4MB total)"}
+            {imageFiles ? `${imageFiles.length} file(s) selected` : "Select one or multiple images (max 30MB total)"}
           </p>
         </div>
         <div className="flex items-center space-x-2">

@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { Plus, Edit, Trash2, Eye, EyeOff, X } from "lucide-react";
 import { toast } from "sonner";
+import { uploadFilesViaSignedUrls } from "@/lib/uploads/signedUploadClient";
 
 interface Destination {
   id: string;
@@ -100,56 +101,88 @@ export default function DestinationsManager({
       return;
     }
 
-    // Validate total file size (max 10MB total)
-    let totalFileSize = 0;
-    if (heroImageFile) {
-      if (heroImageFile.size > 5 * 1024 * 1024) {
-        toast.error("Hero image must be less than 5MB");
-        return;
-      }
-      totalFileSize += heroImageFile.size;
+    // Require hero image for destinations (prevents blank destination cards)
+    if (!heroImageFile) {
+      toast.error("Please select a hero image");
+      return;
+    }
+
+    // Validate file sizes (client UX only)
+    const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB per file
+    if (heroImageFile.size > MAX_FILE_SIZE) {
+      toast.error("Hero image must be less than 10MB");
+      return;
     }
     if (imageFiles) {
-      // Check each file individually first - use for...of so return actually stops execution
-      for (const file of Array.from(imageFiles)) {
-        if (file.size > 5 * 1024 * 1024) {
-          toast.error(`Image ${file.name} is too large (max 5MB per file)`);
-          return; // Stop execution immediately
+      for (const f of Array.from(imageFiles)) {
+        if (f.size > MAX_FILE_SIZE) {
+          toast.error(`Image ${f.name} is too large (max 10MB per file)`);
+          return;
         }
-        totalFileSize += file.size;
-      }
-      // Check total size
-      if (totalFileSize > 10 * 1024 * 1024) {
-        toast.error("Total image size must be less than 10MB");
-        return; // Stop execution immediately
       }
     }
 
     try {
-      const formDataToSend = new FormData();
-      formDataToSend.append("name", formData.name.trim().substring(0, MAX_NAME_LENGTH));
-      formDataToSend.append("slug", formData.slug.trim().toLowerCase().substring(0, MAX_SLUG_LENGTH));
-      formDataToSend.append("tagline", formData.tagline.trim().substring(0, MAX_TAGLINE_LENGTH));
-      formDataToSend.append("description", formData.description.trim().substring(0, MAX_DESCRIPTION_LENGTH));
-      formDataToSend.append("isPublished", formData.isPublished.toString());
+      const folder = `destinations/${formData.slug}`
+        .replace(/[^a-z0-9/-]/gi, "-")
+        .replace(/-+/g, "-");
 
-      // Only append files that passed validation
-      if (heroImageFile && heroImageFile.size > 0 && heroImageFile.size <= 5 * 1024 * 1024) {
-        formDataToSend.append("heroImage", heroImageFile);
-      }
+      const heroUploads = await uploadFilesViaSignedUrls({
+        bucket: "destinations",
+        folder,
+        files: [heroImageFile],
+      });
+      const hero = heroUploads[0];
 
-      // Only append files that passed validation
-      if (imageFiles) {
-        for (const file of Array.from(imageFiles)) {
-          if (file.size > 0 && file.size <= 5 * 1024 * 1024) {
-            formDataToSend.append("images", file);
-          }
-        }
-      }
+      const additionalFiles = imageFiles ? Array.from(imageFiles) : [];
+      const additionalUploads =
+        additionalFiles.length > 0
+          ? await uploadFilesViaSignedUrls({
+              bucket: "destinations",
+              folder,
+              files: additionalFiles,
+            })
+          : [];
+
+      const imagesMeta = [
+        {
+          url: hero.publicUrl,
+          bucket: "destinations",
+          filename: heroImageFile.name,
+          filePath: hero.path,
+          fileSize: heroImageFile.size,
+          mimeType: heroImageFile.type,
+          isHero: true,
+          displayOrder: 0,
+        },
+        ...additionalUploads.map((u, idx) => {
+          const f = additionalFiles[idx];
+          return {
+            url: u.publicUrl,
+            bucket: "destinations",
+            filename: f?.name || u.filename,
+            filePath: u.path,
+            fileSize: f?.size || 0,
+            mimeType: f?.type || u.contentType,
+            isHero: false,
+            displayOrder: 1 + idx,
+          };
+        }),
+      ];
 
       const response = await fetch("/api/destinations", {
         method: "POST",
-        body: formDataToSend,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: formData.name.trim().substring(0, MAX_NAME_LENGTH),
+          slug: formData.slug.trim().toLowerCase().substring(0, MAX_SLUG_LENGTH),
+          tagline: formData.tagline.trim().substring(0, MAX_TAGLINE_LENGTH),
+          description: formData.description.trim().substring(0, MAX_DESCRIPTION_LENGTH),
+          isPublished: formData.isPublished,
+          heroImage: hero.publicUrl,
+          images: additionalUploads.map((u) => u.publicUrl),
+          imagesMeta,
+        }),
       });
 
       if (response.ok) {
@@ -160,25 +193,12 @@ export default function DestinationsManager({
         resetForm();
       } else {
         const errorData = await response.json().catch(() => ({ error: "Failed to create destination" }));
-        if (response.status === 413) {
-          toast.error("Request too large. Please reduce image sizes or description length.");
-        } else {
-          toast.error(errorData.error || errorData.details || "Failed to create destination");
-        }
+        toast.error(errorData.error || errorData.details || "Failed to create destination");
       }
     } catch (error) {
       console.error("Error:", error);
       toast.error(error instanceof Error ? error.message : "An error occurred");
     }
-  };
-
-  const convertToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = (error) => reject(error);
-    });
   };
 
   const handleEdit = async () => {
@@ -217,56 +237,97 @@ export default function DestinationsManager({
       return;
     }
 
-    // Validate total file size (max 10MB total)
-    let totalFileSize = 0;
-    if (heroImageFile) {
-      if (heroImageFile.size > 5 * 1024 * 1024) {
-        toast.error("Hero image must be less than 5MB");
-        return; // Stop execution immediately
-      }
-      totalFileSize += heroImageFile.size;
-    }
-    if (imageFiles) {
-      // Check each file individually first
-      for (const file of Array.from(imageFiles)) {
-        if (file.size > 5 * 1024 * 1024) {
-          toast.error(`Image ${file.name} is too large (max 5MB per file)`);
-          return; // Stop execution immediately
-        }
-        totalFileSize += file.size;
-      }
-      // Check total size
-      if (totalFileSize > 10 * 1024 * 1024) {
-        toast.error("Total image size must be less than 10MB");
-        return; // Stop execution immediately
-      }
-    }
+    // If hero/additional images are selected during edit, we replace destination images with the new set
+    const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB per file
+    let heroImage: string | undefined;
+    let images: string[] | undefined;
+    let imagesMeta: any[] | undefined;
 
-    try {
-      const formDataToSend = new FormData();
-      formDataToSend.append("name", formData.name.trim().substring(0, MAX_NAME_LENGTH));
-      formDataToSend.append("slug", formData.slug.trim().toLowerCase().substring(0, MAX_SLUG_LENGTH));
-      formDataToSend.append("tagline", formData.tagline.trim().substring(0, MAX_TAGLINE_LENGTH));
-      formDataToSend.append("description", formData.description.trim().substring(0, MAX_DESCRIPTION_LENGTH));
-      formDataToSend.append("isPublished", formData.isPublished.toString());
+    const folder = `destinations/${formData.slug}`
+      .replace(/[^a-z0-9/-]/gi, "-")
+      .replace(/-+/g, "-");
 
-      // Only append files that passed validation
-      if (heroImageFile && heroImageFile.size > 0 && heroImageFile.size <= 5 * 1024 * 1024) {
-        formDataToSend.append("heroImage", heroImageFile);
+    if (heroImageFile || (imageFiles && imageFiles.length > 0)) {
+      // If you're changing images, require a new hero image so we can fully sync Image rows
+      if (!heroImageFile) {
+        toast.error("To change images, please select a new hero image (required)");
+        return;
       }
-      
-      // Only append files that passed validation
+
+      if (heroImageFile.size > MAX_FILE_SIZE) {
+        toast.error("Hero image must be less than 10MB");
+        return;
+      }
       if (imageFiles) {
-        for (const file of Array.from(imageFiles)) {
-          if (file.size > 0 && file.size <= 5 * 1024 * 1024) {
-            formDataToSend.append("images", file);
+        for (const f of Array.from(imageFiles)) {
+          if (f.size > MAX_FILE_SIZE) {
+            toast.error(`Image ${f.name} is too large (max 10MB per file)`);
+            return;
           }
         }
       }
 
+      const heroUploads = await uploadFilesViaSignedUrls({
+        bucket: "destinations",
+        folder,
+        files: [heroImageFile],
+      });
+      const hero = heroUploads[0];
+      heroImage = hero.publicUrl;
+
+      const additionalFiles = imageFiles ? Array.from(imageFiles) : [];
+      const additionalUploads =
+        additionalFiles.length > 0
+          ? await uploadFilesViaSignedUrls({
+              bucket: "destinations",
+              folder,
+              files: additionalFiles,
+            })
+          : [];
+
+      images = additionalUploads.map((u) => u.publicUrl);
+
+      imagesMeta = [
+        {
+          url: hero.publicUrl,
+          bucket: "destinations",
+          filename: heroImageFile.name,
+          filePath: hero.path,
+          fileSize: heroImageFile.size,
+          mimeType: heroImageFile.type,
+          isHero: true,
+          displayOrder: 0,
+        },
+        ...additionalUploads.map((u, idx) => {
+          const f = additionalFiles[idx];
+          return {
+            url: u.publicUrl,
+            bucket: "destinations",
+            filename: f?.name || u.filename,
+            filePath: u.path,
+            fileSize: f?.size || 0,
+            mimeType: f?.type || u.contentType,
+            isHero: false,
+            displayOrder: 1 + idx,
+          };
+        }),
+      ];
+    }
+
+    try {
       const response = await fetch(`/api/destinations/${editingDestination.id}`, {
         method: "PUT",
-        body: formDataToSend,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: formData.name.trim().substring(0, MAX_NAME_LENGTH),
+          slug: formData.slug.trim().toLowerCase().substring(0, MAX_SLUG_LENGTH),
+          tagline: formData.tagline.trim().substring(0, MAX_TAGLINE_LENGTH),
+          description: formData.description.trim().substring(0, MAX_DESCRIPTION_LENGTH),
+          isPublished: formData.isPublished,
+          ...(heroImage ? { heroImage } : {}),
+          ...(images ? { images } : {}),
+          ...(imagesMeta ? { imagesMeta } : {}),
+        }),
       });
 
       if (response.ok) {
@@ -282,11 +343,7 @@ export default function DestinationsManager({
         resetForm();
       } else {
         const errorData = await response.json().catch(() => ({ error: "Failed to update destination" }));
-        if (response.status === 413) {
-          toast.error("Request too large. Please reduce image sizes or description length.");
-        } else {
-          toast.error(errorData.error || errorData.details || "Failed to update destination");
-        }
+        toast.error(errorData.error || errorData.details || "Failed to update destination");
       }
     } catch (error) {
       console.error("Error:", error);

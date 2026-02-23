@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/dialog";
 import { Plus, Edit, Trash2, Eye, EyeOff, X, Upload } from "lucide-react";
 import { toast } from "sonner";
+import { uploadFilesViaSignedUrls } from "@/lib/uploads/signedUploadClient";
 
 interface Package {
   id: string;
@@ -113,46 +114,60 @@ export default function PackagesManager({
       return;
     }
 
-    // Validate total file size (max 10MB total)
-    let totalFileSize = 0;
-    if (imageFiles) {
-      // Check each file individually first - use for...of so return actually stops execution
-      for (const file of Array.from(imageFiles)) {
-        if (file.size > 5 * 1024 * 1024) {
-          toast.error(`Image ${file.name} is too large (max 5MB per file)`);
-          return; // Stop execution immediately
-        }
-        totalFileSize += file.size;
-      }
-      // Check total size
-      if (totalFileSize > 10 * 1024 * 1024) {
-        toast.error("Total image size must be less than 10MB");
-        return; // Stop execution immediately
+    // Require at least 1 image for packages
+    if (!imageFiles || imageFiles.length === 0) {
+      toast.error("Please add at least one package image");
+      return;
+    }
+
+    // Validate file sizes (client UX only; actual uploads go directly to Supabase)
+    const files = Array.from(imageFiles);
+    const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB per file
+    for (const f of files) {
+      if (f.size > MAX_FILE_SIZE) {
+        toast.error(`Image ${f.name} is too large (max 10MB per file)`);
+        return;
       }
     }
 
     try {
-      const formDataToSend = new FormData();
-      formDataToSend.append("name", formData.name.trim().substring(0, MAX_NAME_LENGTH));
-      formDataToSend.append("slug", formData.slug.trim().toLowerCase().substring(0, MAX_SLUG_LENGTH));
-      formDataToSend.append("packageType", formData.packageType);
-      formDataToSend.append("description", formData.description.trim().substring(0, MAX_DESCRIPTION_LENGTH));
-      formDataToSend.append("pricing", formData.pricing.toString());
-      formDataToSend.append("daysOfTravel", formData.daysOfTravel.toString());
-      formDataToSend.append("isActive", formData.isActive.toString());
+      const folder = `packages/${formData.slug}`
+        .replace(/[^a-z0-9/-]/gi, "-")
+        .replace(/-+/g, "-");
+      const uploads = await uploadFilesViaSignedUrls({
+        bucket: "packages",
+        folder,
+        files,
+      });
 
-      // Only append files that passed validation
-      if (imageFiles) {
-        for (const file of Array.from(imageFiles)) {
-          if (file.size > 0 && file.size <= 5 * 1024 * 1024) {
-            formDataToSend.append("images", file);
-          }
-        }
-      }
+      const imagesMeta = uploads.map((u, idx) => {
+        const f = files[idx];
+        return {
+          url: u.publicUrl,
+          bucket: "packages",
+          filename: f?.name || u.filename,
+          filePath: u.path,
+          fileSize: f?.size || 0,
+          mimeType: f?.type || u.contentType,
+          isHero: idx === 0,
+          displayOrder: idx,
+        };
+      });
 
       const response = await fetch("/api/packages", {
         method: "POST",
-        body: formDataToSend,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: formData.name.trim().substring(0, MAX_NAME_LENGTH),
+          slug: formData.slug.trim().toLowerCase().substring(0, MAX_SLUG_LENGTH),
+          packageType: formData.packageType,
+          description: formData.description.trim().substring(0, MAX_DESCRIPTION_LENGTH),
+          pricing: formData.pricing,
+          daysOfTravel: formData.daysOfTravel,
+          isActive: formData.isActive,
+          images: uploads.map((u) => u.publicUrl),
+          imagesMeta,
+        }),
       });
 
       if (response.ok) {
@@ -163,25 +178,12 @@ export default function PackagesManager({
         resetForm();
       } else {
         const errorData = await response.json().catch(() => ({ error: "Failed to create package" }));
-        if (response.status === 413) {
-          toast.error("Request too large. Please reduce image sizes or description length.");
-        } else {
-          toast.error(errorData.error || errorData.details || "Failed to create package");
-        }
+        toast.error(errorData.error || errorData.details || "Failed to create package");
       }
     } catch (error) {
       console.error("Error:", error);
       toast.error(error instanceof Error ? error.message : "An error occurred");
     }
-  };
-
-  const convertToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = (error) => reject(error);
-    });
   };
 
   const handleEdit = async () => {
@@ -225,46 +227,59 @@ export default function PackagesManager({
       return;
     }
 
-    // Validate total file size (max 10MB total)
-    let totalFileSize = 0;
-    if (imageFiles) {
-      // Check each file individually first
-      for (const file of Array.from(imageFiles)) {
-        if (file.size > 5 * 1024 * 1024) {
-          toast.error(`Image ${file.name} is too large (max 5MB per file)`);
-          return; // Stop execution immediately
+    // If images are selected during edit, we replace package images with the new set
+    let images: string[] | undefined;
+    let imagesMeta: any[] | undefined;
+
+    if (imageFiles && imageFiles.length > 0) {
+      const files = Array.from(imageFiles);
+      const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB per file
+      for (const f of files) {
+        if (f.size > MAX_FILE_SIZE) {
+          toast.error(`Image ${f.name} is too large (max 10MB per file)`);
+          return;
         }
-        totalFileSize += file.size;
       }
-      // Check total size
-      if (totalFileSize > 10 * 1024 * 1024) {
-        toast.error("Total image size must be less than 10MB");
-        return; // Stop execution immediately
-      }
+
+      const folder = `packages/${formData.slug}`
+        .replace(/[^a-z0-9/-]/gi, "-")
+        .replace(/-+/g, "-");
+      const uploads = await uploadFilesViaSignedUrls({
+        bucket: "packages",
+        folder,
+        files,
+      });
+      images = uploads.map((u) => u.publicUrl);
+      imagesMeta = uploads.map((u, idx) => {
+        const f = files[idx];
+        return {
+          url: u.publicUrl,
+          bucket: "packages",
+          filename: f?.name || u.filename,
+          filePath: u.path,
+          fileSize: f?.size || 0,
+          mimeType: f?.type || u.contentType,
+          isHero: idx === 0,
+          displayOrder: idx,
+        };
+      });
     }
 
     try {
-      const formDataToSend = new FormData();
-      formDataToSend.append("name", formData.name.trim().substring(0, MAX_NAME_LENGTH));
-      formDataToSend.append("slug", formData.slug.trim().toLowerCase().substring(0, MAX_SLUG_LENGTH));
-      formDataToSend.append("packageType", formData.packageType);
-      formDataToSend.append("description", formData.description.trim().substring(0, MAX_DESCRIPTION_LENGTH));
-      formDataToSend.append("pricing", formData.pricing.toString());
-      formDataToSend.append("daysOfTravel", formData.daysOfTravel.toString());
-      formDataToSend.append("isActive", formData.isActive.toString());
-      
-      // Only append files that passed validation
-      if (imageFiles) {
-        for (const file of Array.from(imageFiles)) {
-          if (file.size > 0 && file.size <= 5 * 1024 * 1024) {
-            formDataToSend.append("images", file);
-          }
-        }
-      }
-
       const response = await fetch(`/api/packages/${editingPackage.id}`, {
         method: "PUT",
-        body: formDataToSend,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: formData.name.trim().substring(0, MAX_NAME_LENGTH),
+          slug: formData.slug.trim().toLowerCase().substring(0, MAX_SLUG_LENGTH),
+          packageType: formData.packageType,
+          description: formData.description.trim().substring(0, MAX_DESCRIPTION_LENGTH),
+          pricing: formData.pricing,
+          daysOfTravel: formData.daysOfTravel,
+          isActive: formData.isActive,
+          ...(images ? { images } : {}),
+          ...(imagesMeta ? { imagesMeta } : {}),
+        }),
       });
 
       if (response.ok) {
@@ -278,11 +293,7 @@ export default function PackagesManager({
         resetForm();
       } else {
         const errorData = await response.json().catch(() => ({ error: "Failed to update package" }));
-        if (response.status === 413) {
-          toast.error("Request too large. Please reduce image sizes or description length.");
-        } else {
-          toast.error(errorData.error || errorData.details || "Failed to update package");
-        }
+        toast.error(errorData.error || errorData.details || "Failed to update package");
       }
     } catch (error) {
       console.error("Error:", error);
