@@ -7,8 +7,11 @@ export const auth = betterAuth({
   database: new Pool({
     connectionString: process.env.DATABASE_URL,
   }),
-  // Allow both production and local development origins for auth flows
+  // Origins must match the browser's Origin header (scheme + host + port).
+  // Include www and apex so either hostname works; NEXT_PUBLIC_APP_URL can add previews.
   trustedOrigins: [
+    "https://www.thesolofafrican.com",
+    "https://thesolofafrican.com",
     "https://sol-revamp.vercel.app",
     "http://localhost:3000",
     process.env.NEXT_PUBLIC_APP_URL || "",
