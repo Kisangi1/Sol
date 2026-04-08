@@ -2,17 +2,13 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
-First, run the development server:
+This project uses [pnpm](https://pnpm.io). Install dependencies with `pnpm install`, then run the development server:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
 pnpm dev
-# or
-bun dev
 ```
+
+Other package managers may work, but pnpm is what this repo is set up for (`pnpm-lock.yaml`).
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 

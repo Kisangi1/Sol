@@ -57,6 +57,7 @@ export function AboutClient() {
                     src="/images/our_story.png"
                     alt="Our Journey"
                     fill
+                    sizes="(max-width: 768px) 100vw, 66vw"
                     className="object-cover"
                   />
                   <div className="absolute inset-0 bg-linear-to-t from-black/90 via-black/50 to-transparent" />
@@ -142,6 +143,7 @@ export function AboutClient() {
                     src="/images/tour_guide.png"
                     alt="Our Expertise"
                     fill
+                    sizes="(max-width: 768px) 100vw, 66vw"
                     className="object-cover"
                   />
                   <div className="absolute inset-0 bg-linear-to-t from-black/90 via-black/50 to-transparent" />
@@ -159,6 +161,29 @@ export function AboutClient() {
               </div>
             </motion.div>
           </div>
+
+          {/* SafariBookings (text link on About only) */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true, margin: "-80px" }}
+            transition={{ duration: 0.5 }}
+            className="max-w-3xl mx-auto px-2"
+          >
+            <p className="text-gray-400 text-base sm:text-lg leading-relaxed text-center">
+              We also cooperate with other listing platforms and are represented
+              on the online African tour marketplace{" "}
+              <a
+                href="https://www.safaribookings.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-orange-500 hover:text-orange-400 underline underline-offset-2"
+              >
+                SafariBookings.com
+              </a>
+              .
+            </p>
+          </motion.div>
         </div>
       </div>
 

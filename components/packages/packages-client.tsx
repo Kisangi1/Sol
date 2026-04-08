@@ -7,7 +7,6 @@ import {
   type FilterOptions,
 } from "@/components/shared/package-filters";
 import { Pagination } from "@/components/shared/pagination";
-import CTASection from "@/components/shared/cta-section";
 import GrainOverlay from "@/components/shared/grain-overlay";
 
 interface PackagesClientProps {
@@ -254,15 +253,6 @@ export function PackagesClient({ packages: initialPackages }: PackagesClientProp
           )}
         </div>
       </div>
-
-      {/* CTA Section */}
-      <CTASection
-        title="Want Something Unique?"
-        description="Don't see exactly what you're looking for? Let's craft a personalized safari experience tailored just for you"
-        image="/images/sol_car.jpg"
-        buttonText="Chat with Michael Kisangi"
-        buttonUrl="https://wa.me/+254768453819"
-      />
     </>
   );
 }

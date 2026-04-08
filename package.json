@@ -2,18 +2,19 @@
   "name": "sol_revamp",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@9.15.9",
   "scripts": {
     "dev": "next dev",
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "biome check",
     "format": "biome format --write",
-    "prisma:generate": "npx dotenv-cli -e .env -- prisma generate",
-    "prisma:push": "npx dotenv-cli -e .env -- prisma db push",
-    "prisma:studio": "npx dotenv-cli -e .env -- prisma studio",
-    "prisma:migrate": "npx dotenv-cli -e .env -- prisma migrate dev",
-    "seed:admins": "npx dotenv-cli -e .env -- tsx scripts/seed-admin-emails.ts",
-    "reset:catalog": "npx dotenv-cli -e .env -- tsx scripts/reset-packages-destinations.ts"
+    "prisma:generate": "dotenv-cli -e .env -- prisma generate",
+    "prisma:push": "dotenv-cli -e .env -- prisma db push",
+    "prisma:studio": "dotenv-cli -e .env -- prisma studio",
+    "prisma:migrate": "dotenv-cli -e .env -- prisma migrate dev",
+    "seed:admins": "dotenv-cli -e .env -- tsx scripts/seed-admin-emails.ts",
+    "reset:catalog": "dotenv-cli -e .env -- tsx scripts/reset-packages-destinations.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
